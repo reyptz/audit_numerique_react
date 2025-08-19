@@ -3,26 +3,40 @@ import { Cooperatives, CooperativeAPI, Cotisations } from "../api";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
 import { useForm } from "react-hook-form";
-import type { Cotisation, TypeCotisation, StatutCotisation } from "../models";
+import type { SubmitHandler } from "react-hook-form";
+import type { Cotisation, TypeCotisation, StatutCotisation, Membre } from "../models";
 
 // Money formatting function
 export const money = (n: number | string) =>
   new Intl.NumberFormat(undefined, { style: "currency", currency: "XOF", maximumFractionDigits: 0 })
     .format(typeof n === "string" ? parseFloat(n) : n);
 
-type Form = { coopId: string; membreId: string; montant: string; type: TypeCotisation; statut: StatutCotisation };
+type Form = {
+  coopId: string;
+  membreId: string;
+  montant: string;
+  type: TypeCotisation;
+  statut: StatutCotisation;
+};
 
 export default function CotisationsPage() {
   const [coops, setCoops] = useState<{ id: number; nom: string }[]>([]);
   const [coopId, setCoopId] = useState<number | "">("");
-  const [membres, setMembres] = useState<{ id: number; utilisateur: number }[]>([]);
+  const [membres, setMembres] = useState<Membre[]>([]);
   const [rows, setRows] = useState<Cotisation[]>([]);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedCotisation, setSelectedCotisation] = useState<Cotisation | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
-  const { register, handleSubmit, setValue, reset } = useForm<Form>({
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<Form>({
     defaultValues: {
       coopId: "",
       membreId: "",
@@ -32,25 +46,42 @@ export default function CotisationsPage() {
     },
   });
 
-  const fetchCoops = () =>
+  const fetchCoops = () => {
+    setIsLoading(true);
     Cooperatives.list()
       .then(setCoops)
-      .catch(() => setError("Erreur lors du chargement des coopératives"));
+      .catch(() => {
+        setError("Erreur lors du chargement des coopératives");
+        toast.error("Erreur lors du chargement des coopératives");
+      })
+      .finally(() => setIsLoading(false));
+  };
 
   const fetchMembres = () => {
     if (!coopId) {
       setMembres([]);
       return;
     }
+    setIsLoading(true);
     CooperativeAPI.membres(Number(coopId))
       .then(setMembres)
-      .catch(() => setError("Erreur lors du chargement des membres"));
+      .catch(() => {
+        setError("Erreur lors du chargement des membres");
+        toast.error("Erreur lors du chargement des membres");
+      })
+      .finally(() => setIsLoading(false));
   };
 
-  const fetchAll = () =>
+  const fetchAll = () => {
+    setIsLoading(true);
     Cotisations.list()
       .then(setRows)
-      .catch(() => setError("Erreur lors du chargement des cotisations"));
+      .catch(() => {
+        setError("Erreur lors du chargement des cotisations");
+        toast.error("Erreur lors du chargement des cotisations");
+      })
+      .finally(() => setIsLoading(false));
+  };
 
   useEffect(() => {
     fetchCoops();
@@ -61,7 +92,8 @@ export default function CotisationsPage() {
     fetchMembres();
   }, [coopId]);
 
-  const onSubmit = async (data: Form) => {
+  const onSubmit: SubmitHandler<Form> = async (data) => {
+    setIsLoading(true);
     try {
       await Cotisations.create({
         membre: Number(data.membreId),
@@ -82,11 +114,14 @@ export default function CotisationsPage() {
     } catch {
       setError("Erreur lors de la création de la cotisation");
       toast.error("Erreur lors de la création");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleEdit = async (data: Form) => {
+  const handleEdit: SubmitHandler<Form> = async (data) => {
     if (!selectedCotisation) return;
+    setIsLoading(true);
     try {
       const updatedCotisation = await Cotisations.update(selectedCotisation.id, {
         membre: Number(data.membreId),
@@ -109,11 +144,14 @@ export default function CotisationsPage() {
     } catch {
       setError("Erreur lors de la modification de la cotisation");
       toast.error("Erreur lors de la modification");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleDelete = async () => {
     if (!selectedCotisation) return;
+    setIsLoading(true);
     try {
       await Cotisations.remove(selectedCotisation.id);
       setRows(rows.filter((row) => row.id !== selectedCotisation.id));
@@ -124,6 +162,8 @@ export default function CotisationsPage() {
     } catch {
       setError("Erreur lors de la suppression de la cotisation");
       toast.error("Erreur lors de la suppression");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -132,7 +172,7 @@ export default function CotisationsPage() {
     const coop = membres.find((m) => m.id === cotisation.membre)?.cooperative;
     setValue("coopId", String(coop || ""));
     setCoopId(coop || "");
-    fetchMembres(); // Ensure membres are loaded for the cooperative
+    fetchMembres();
     setValue("membreId", String(cotisation.membre));
     setValue("montant", cotisation.montant);
     setValue("type", cotisation.type);
@@ -170,57 +210,89 @@ export default function CotisationsPage() {
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}
+      {isLoading && <p className="text-center text-neutral-500">Chargement...</p>}
 
       <form
         onSubmit={handleSubmit(onSubmit)}
         className="mb-8 grid md:grid-cols-4 gap-3"
       >
-        <Select
-          value={coopId}
-          onChange={(v) => {
-            setCoopId(v ? Number(v) : "");
-            setValue("coopId", v);
-          }}
-          options={coops.map((c) => ({ label: c.nom, value: c.id }))}
-          placeholder="Coopérative"
-        />
-        <Select
-          onChange={(v) => setValue("membreId", v)}
-          options={membres.map((m) => ({ label: `Membre #${m.id} (Utilisateur #${m.utilisateur})`, value: m.id }))}
-          placeholder="Membre"
-        />
-        <input
-          {...register("montant", { required: true })}
-          className="rounded-xl border px-3 py-2 bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700"
-          placeholder="Montant"
-        />
-        <Select
-          onChange={(v) => setValue("type", v as TypeCotisation)}
-          options={[
-            { label: "Régulière", value: "reguliere" },
-            { label: "Exceptionnelle", value: "exceptionnelle" },
-            { label: "Solidarité", value: "solidarite" },
-          ]}
-          placeholder="Type"
-          value={register("type").value}
-        />
-        <select
-          {...register("statut", { required: true })}
-          className="rounded-xl border px-3 py-2 bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700"
+        <div>
+          <Select
+            value={coopId}
+            onChange={(v) => {
+              setCoopId(v ? Number(v) : "");
+              setValue("coopId", v);
+            }}
+            options={coops.map((c) => ({ label: c.nom, value: c.id }))}
+            placeholder="Coopérative"
+          />
+          {errors.coopId && <p className="text-red-500 text-sm mt-1">{errors.coopId.message}</p>}
+        </div>
+        <div>
+          <Select
+            onChange={(v) => setValue("membreId", v)}
+            options={membres.map((m) => ({
+              label: `Membre #${m.id} (Utilisateur #${m.utilisateur})`,
+              value: m.id,
+            }))}
+            placeholder="Membre"
+          />
+          {errors.membreId && <p className="text-red-500 text-sm mt-1">{errors.membreId.message}</p>}
+        </div>
+        <div>
+          <input
+            {...register("montant", {
+              required: "Le montant est requis",
+              pattern: {
+                value: /^\d+(\.\d+)?$/,
+                message: "Le montant doit être un nombre positif",
+              },
+            })}
+            className={`rounded-xl border px-3 py-2 bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700 ${
+              errors.montant ? "border-red-500" : ""
+            }`}
+            placeholder="Montant"
+          />
+          {errors.montant && <p className="text-red-500 text-sm mt-1">{errors.montant.message}</p>}
+        </div>
+        <div>
+          <Select
+            onChange={(v) => setValue("type", v as TypeCotisation)}
+            options={[
+              { label: "Régulière", value: "reguliere" },
+              { label: "Exceptionnelle", value: "exceptionnelle" },
+              { label: "Solidarité", value: "solidarite" },
+            ]}
+            placeholder="Type"
+          />
+          {errors.type && <p className="text-red-500 text-sm mt-1">{errors.type.message}</p>}
+        </div>
+        <div>
+          <select
+            {...register("statut", { required: "Le statut est requis" })}
+            className={`rounded-xl border px-3 py-2 bg-white dark:bg-neutral-900 border-neutral-300 dark:border-neutral-700 ${
+              errors.statut ? "border-red-500" : ""
+            }`}
+          >
+            <option value="en_attente">En attente</option>
+            <option value="validee">Validée</option>
+            <option value="rejetee">Rejetée</option>
+          </select>
+          {errors.statut && <p className="text-red-500 text-sm mt-1">{errors.statut.message}</p>}
+        </div>
+        <button
+          type="submit"
+          disabled={isLoading}
+          className={`rounded-xl bg-brand-600 text-white px-4 py-2 hover:bg-brand-700 md:col-span-4 ${
+            isLoading ? "opacity-50 cursor-not-allowed" : ""
+          }`}
         >
-          <option value="en_attente">En attente</option>
-          <option value="validee">Validée</option>
-          <option value="rejetee">Rejetée</option>
-        </select>
-        <button className="rounded-xl bg-brand-600 text-white px-4 py-2 hover:bg-brand-700 md:col-span-4">
-          Créer
+          {isLoading ? "Création..." : "Créer"}
         </button>
       </form>
 
       {viewMode === "table" && (
-        <table
-          className="w-full text-sm border border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden"
-        >
+        <table className="w-full text-sm border border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden">
           <thead className="bg-neutral-50 dark:bg-neutral-900">
             <tr>
               <th className="p-3 text-left">#</th>
@@ -235,10 +307,7 @@ export default function CotisationsPage() {
           </thead>
           <tbody>
             {rows.map((c) => (
-              <tr
-                key={c.id}
-                className="border-t border-neutral-200 dark:border-neutral-800"
-              >
+              <tr key={c.id} className="border-t border-neutral-200 dark:border-neutral-800">
                 <td className="p-3">{c.id}</td>
                 <td className="p-3">#{c.membre}</td>
                 <td className="p-3">
@@ -304,8 +373,7 @@ export default function CotisationsPage() {
                 <strong>Statut:</strong> {cotisation.statut}
               </p>
               <p>
-                <strong>Date de paiement:</strong>{" "}
-                {new Date(cotisation.date_paiement).toLocaleDateString()}
+                <strong>Date de paiement:</strong> {new Date(cotisation.date_paiement).toLocaleDateString()}
               </p>
               <div className="mt-4 flex space-x-2">
                 <button
@@ -333,12 +401,8 @@ export default function CotisationsPage() {
       {isEditModalOpen && selectedCotisation && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">
-              Modifier Cotisation #{selectedCotisation.id}
-            </h2>
-            <form
-              onSubmit={handleSubmit(handleEdit)}
-            >
+            <h2 className="text-xl font-semibold mb-4">Modifier Cotisation #{selectedCotisation.id}</h2>
+            <form onSubmit={handleSubmit(handleEdit)}>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Coopérative</label>
                 <Select
@@ -355,7 +419,10 @@ export default function CotisationsPage() {
                 <label className="block text-sm font-medium">Membre</label>
                 <Select
                   onChange={(v) => setValue("membreId", v)}
-                  options={membres.map((m) => ({ label: `Membre #${m.id} (Utilisateur #${m.utilisateur})`, value: m.id }))}
+                  options={membres.map((m) => ({
+                    label: `Membre #${m.id} (Utilisateur #${m.utilisateur})`,
+                    value: m.id,
+                  }))}
                   placeholder="Membre"
                   value={String(selectedCotisation.membre)}
                 />
@@ -363,10 +430,17 @@ export default function CotisationsPage() {
               <div className="mb-4">
                 <label className="block text-sm font-medium">Montant</label>
                 <input
-                  {...register("montant", { required: true })}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
+                  {...register("montant", {
+                    required: "Le montant est requis",
+                    pattern: {
+                      value: /^\d+(\.\d+)?$/,
+                      message: "Le montant doit être un nombre positif",
+                    },
+                  })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${errors.montant ? "border-red-500" : ""}`}
                   placeholder="Montant"
                 />
+                {errors.montant && <p className="text-red-500 text-sm mt-1">{errors.montant.message}</p>}
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Type</label>
@@ -380,31 +454,37 @@ export default function CotisationsPage() {
                   placeholder="Type"
                   value={selectedCotisation.type}
                 />
+                {errors.type && <p className="text-red-500 text-sm mt-1">{errors.type.message}</p>}
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Statut</label>
                 <select
-                  {...register("statut", { required: true })}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
+                  {...register("statut", { required: "Le statut est requis" })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${errors.statut ? "border-red-500" : ""}`}
                 >
                   <option value="en_attente">En attente</option>
                   <option value="validee">Validée</option>
                   <option value="rejetee">Rejetée</option>
                 </select>
+                {errors.statut && <p className="text-red-500 text-sm mt-1">{errors.statut.message}</p>}
               </div>
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
                   className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                  disabled={isLoading}
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  className={`px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 ${
+                    isLoading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  disabled={isLoading}
                 >
-                  Enregistrer
+                  {isLoading ? "Enregistrement..." : "Enregistrer"}
                 </button>
               </div>
             </form>
@@ -418,21 +498,24 @@ export default function CotisationsPage() {
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
             <h2 className="text-xl font-semibold mb-4">Confirmer la suppression</h2>
             <p>
-              Êtes-vous sûr de vouloir supprimer la cotisation #{selectedCotisation.id} (Membre #
-              {selectedCotisation.membre}) ?
+              Êtes-vous sûr de vouloir supprimer la cotisation #{selectedCotisation.id} (Membre #{selectedCotisation.membre}) ?
             </p>
             <div className="flex justify-end space-x-2 mt-4">
               <button
                 onClick={() => setIsDeleteModalOpen(false)}
                 className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                disabled={isLoading}
               >
                 Annuler
               </button>
               <button
                 onClick={handleDelete}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                className={`px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 ${
+                  isLoading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={isLoading}
               >
-                Supprimer
+                {isLoading ? "Suppression..." : "Supprimer"}
               </button>
             </div>
           </div>

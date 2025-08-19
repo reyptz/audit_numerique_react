@@ -1,331 +1,368 @@
 import { useEffect, useState } from "react";
-import { Cooperatives, CooperativeAPI, Membres } from "../api";
-import type { Membre } from "../models";
+import { CooperativeAPI, Cooperatives, Membres, Utilisateurs } from "../api";
 import Select from "../components/Select";
+import toast from "react-hot-toast";
+import { useForm } from "react-hook-form";
+import type { SubmitHandler } from "react-hook-form";
+import type { Membre, Cooperative, Utilisateur } from "../models";
+import { useAuth } from "../store/auth";
 
-export default function Members() {
-  const [coops, setCoops] = useState<{ id: number; nom: string }[]>([]);
-  const [coopId, setCoopId] = useState<number | "">("");
+type Form = {
+  utilisateur: string;
+  cooperative: string;
+  actif: boolean;
+};
+
+export default function MembresPage() {
+  const { user } = useAuth();
+  const [coops, setCoops] = useState<Cooperative[]>([]);
+  const [users, setUsers] = useState<Utilisateur[]>([]);
   const [rows, setRows] = useState<Membre[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
-  const [selectedMember, setSelectedMember] = useState<Membre | null>(null);
-  const [formData, setFormData] = useState<Partial<Membre>>({
-    utilisateur: 0,
-    cooperative: 0,
-    date_adhesion: "",
-    actif: true,
-  });
+  const [selectedMembre, setSelectedMembre] = useState<Membre | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<Form>({
+    defaultValues: { utilisateur: "", cooperative: "", actif: true },
+  });
+
+  const canManage = user?.is_staff || user?.role === "tresorier";
+
+  const fetchData = () => {
+    setIsLoading(true);
+    Promise.all([
+      Cooperatives.list().then((data) => {
+        setCoops(data);
+        if (data.length === 0) {
+          setError("Aucune coopérative disponible. Veuillez en créer une d'abord.");
+          toast.error("Aucune coopérative disponible");
+        }
+      }),
+      Utilisateurs.list().then((data) => {
+        setUsers(data);
+        if (data.length === 0) {
+          setError("Aucun utilisateur disponible. Veuillez en créer un d'abord.");
+          toast.error("Aucun utilisateur disponible");
+        }
+      }),
+      Membres.list().then(setRows),
+    ])
+      .catch(() => {
+        setError("Erreur lors du chargement des données");
+        toast.error("Erreur lors du chargement");
+      })
+      .finally(() => setIsLoading(false));
+  };
 
   useEffect(() => {
-    Cooperatives.list()
-      .then((data) => setCoops(data))
-      .catch((err) => setError("Failed to load cooperatives"));
+    fetchData();
   }, []);
 
-  useEffect(() => {
-    if (!coopId) {
-      setRows([]);
+  const onSubmit: SubmitHandler<Form> = async (data) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
       return;
     }
-    setLoading(true);
-    CooperativeAPI.membres(Number(coopId))
-      .then(setRows)
-      .catch((err) => setError("Failed to load members"))
-      .finally(() => setLoading(false));
-  }, [coopId]);
-
-  const handleAdd = async () => {
+    if (!data.cooperative || !data.utilisateur) {
+      toast.error("Veuillez sélectionner un utilisateur et une coopérative");
+      return;
+    }
+    setIsLoading(true);
     try {
-      const newMember = await Membres.create({ ...formData, cooperative: Number(coopId) });
-      setRows([...rows, newMember]);
-      setIsAddModalOpen(false);
-      setFormData({
-        utilisateur: 0,
-        cooperative: Number(coopId),
-        date_adhesion: "",
-        actif: true,
+      await Membres.create({
+        utilisateur: Number(data.utilisateur),
+        cooperative: Number(data.cooperative),
+        actif: data.actif,
       });
+      toast.success("Membre créé !");
+      reset({ utilisateur: "", cooperative: "", actif: true });
+      setIsCreateModalOpen(false);
+      fetchData();
       setError(null);
     } catch (err) {
-      setError("Failed to add member");
+      const message = err instanceof Error ? err.message : "Erreur inconnue";
+      setError(`Erreur lors de la création du membre : ${message}`);
+      toast.error(`Erreur lors de la création : ${message}`);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleEdit = async () => {
-    if (!selectedMember) return;
+  const handleEdit: SubmitHandler<Form> = async (data) => {
+    if (!canManage || !selectedMembre) return;
+    if (!data.cooperative || !data.utilisateur) {
+      toast.error("Veuillez sélectionner un utilisateur et une coopérative");
+      return;
+    }
+    setIsLoading(true);
     try {
-      const updatedMember = await Membres.update(selectedMember.id, {
-        ...formData,
-        cooperative: Number(coopId),
+      const updatedMembre = await Membres.update(selectedMembre.id, {
+        utilisateur: Number(data.utilisateur),
+        cooperative: Number(data.cooperative),
+        actif: data.actif,
       });
-      setRows(rows.map((row) => (row.id === selectedMember.id ? updatedMember : row)));
+      setRows(rows.map((row) => (row.id === selectedMembre.id ? updatedMembre : row)));
       setIsEditModalOpen(false);
-      setSelectedMember(null);
-      setFormData({
-        utilisateur: 0,
-        cooperative: Number(coopId),
-        date_adhesion: "",
-        actif: true,
-      });
+      setSelectedMembre(null);
+      reset({ utilisateur: "", cooperative: "", actif: true });
+      toast.success("Membre modifié !");
       setError(null);
-    } catch (err) {
-      setError("Failed to update member");
+    } catch {
+      setError("Erreur lors de la modification du membre");
+      toast.error("Erreur lors de la modification");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!selectedMember) return;
+    if (!canManage || !selectedMembre) return;
+    setIsLoading(true);
     try {
-      await Membres.remove(selectedMember.id);
-      setRows(rows.filter((row) => row.id !== selectedMember.id));
+      await Membres.remove(selectedMembre.id);
+      setRows(rows.filter((row) => row.id !== selectedMembre.id));
       setIsDeleteModalOpen(false);
-      setSelectedMember(null);
+      setSelectedMembre(null);
+      toast.success("Membre supprimé !");
       setError(null);
-    } catch (err) {
-      setError("Failed to delete member");
+    } catch {
+      setError("Erreur lors de la suppression du membre");
+      toast.error("Erreur lors de la suppression");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const openEditModal = (member: Membre) => {
-    setSelectedMember(member);
-    setFormData({
-      utilisateur: member.utilisateur,
-      cooperative: member.cooperative,
-      date_adhesion: member.date_adhesion,
-      actif: member.actif,
-    });
+  const openEditModal = (membre: Membre) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
+      return;
+    }
+    setSelectedMembre(membre);
+    setValue("utilisateur", String(membre.utilisateur));
+    setValue("cooperative", String(membre.cooperative));
+    setValue("actif", membre.actif);
     setIsEditModalOpen(true);
   };
 
-  const openDeleteModal = (member: Membre) => {
-    setSelectedMember(member);
+  const openDeleteModal = (membre: Membre) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
+      return;
+    }
+    setSelectedMembre(membre);
     setIsDeleteModalOpen(true);
   };
 
-  const handleInputChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLInputElement>,
-  ) => {
-    const { name, value, type } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: type === "checkbox" ? (e.target as HTMLInputElement).checked : value,
-    }));
-  };
+  if (!user) {
+    return <p className="p-8 text-center">Connexion requise.</p>;
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold">Membres</h1>
-        <div className="flex items-center space-x-4">
-          <Select
-            value={coopId}
-            onChange={(v) => setCoopId(v ? Number(v) : "")}
-            options={coops.map((c) => ({ label: c.nom, value: c.id }))}
-            placeholder="Filtrer par coopérative"
-          />
-          <div className="flex space-x-2">
+        <div className="flex space-x-2">
+          <button
+            onClick={() => setViewMode("table")}
+            className={`px-3 py-1 rounded ${
+              viewMode === "table" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+          >
+            Table
+          </button>
+          <button
+            onClick={() => setViewMode("card")}
+            className={`px-3 py-1 rounded ${
+              viewMode === "card" ? "bg-blue-500 text-white" : "bg-gray-300"
+            }`}
+          >
+            Card
+          </button>
+          {canManage && (
             <button
-              onClick={() => setViewMode("table")}
-              className={`px-3 py-1 rounded ${viewMode === "table" ? "bg-blue-500 text-white" : "bg-gray-300"}`}
+              onClick={() => setIsCreateModalOpen(true)}
+              className={`px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600 ${
+                coops.length === 0 || users.length === 0 ? "opacity-50 cursor-not-allowed" : ""
+              }`}
+              disabled={coops.length === 0 || users.length === 0}
             >
-              Table
+              Créer
             </button>
-            <button
-              onClick={() => setViewMode("card")}
-              className={`px-3 py-1 rounded ${viewMode === "card" ? "bg-blue-500 text-white" : "bg-gray-300"}`}
-            >
-              Card
-            </button>
-          </div>
+          )}
         </div>
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}
+      {isLoading && <p className="text-center text-neutral-500">Chargement...</p>}
 
-      {coopId && (
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="mb-6 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        >
-          Add Member
-        </button>
-      )}
-
-      {!coopId && (
-        <p className="text-neutral-600">Choisissez une coopérative pour lister les membres.</p>
-      )}
-
-      {coopId && viewMode === "table" && (
-        <div className="rounded-2xl border border-neutral-200 dark:border-neutral-800 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-neutral-50 dark:bg-neutral-900">
-              <tr className="text-left">
-                <th className="px-4 py-3">#</th>
-                <th className="px-4 py-3">Utilisateur</th>
-                <th className="px-4 py-3">Actif</th>
-                <th className="px-4 py-3">Adhésion</th>
-                <th className="px-4 py-3">Actions</th>
+      {viewMode === "table" && (
+        <table className="w-full text-sm border border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden">
+          <thead className="bg-neutral-50 dark:bg-neutral-900">
+            <tr>
+              <th className="p-3 text-left">#</th>
+              <th className="p-3">Utilisateur</th>
+              <th className="p-3">Coopérative</th>
+              <th className="p-3">Actif</th>
+              <th className="p-3">Date d'adhésion</th>
+              <th className="p-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((m) => (
+              <tr key={m.id} className="border-t border-neutral-200 dark:border-neutral-800">
+                <td className="p-3">{m.id}</td>
+                <td className="p-3">
+                  {users.find((u) => u.id === m.utilisateur)?.username || `#${m.utilisateur}`}
+                </td>
+                <td className="p-3">{coops.find((c) => c.id === m.cooperative)?.nom || `#${m.cooperative}`}</td>
+                <td className="p-3">{m.actif ? "Oui" : "Non"}</td>
+                <td className="p-3">{new Date(m.date_adhesion).toLocaleDateString()}</td>
+                <td className="p-3">
+                  {canManage && (
+                    <div className="flex space-x-2">
+                      <button
+                        onClick={() => openEditModal(m)}
+                        className="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => openDeleteModal(m)}
+                        className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  )}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading && (
-                <tr>
-                  <td className="px-4 py-3" colSpan={5}>
-                    Chargement…
-                  </td>
-                </tr>
-              )}
-              {!loading &&
-                rows.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="border-t border-neutral-200 dark:border-neutral-800"
-                  >
-                    <td className="px-4 py-3">{r.id}</td>
-                    <td className="px-4 py-3">#{r.utilisateur}</td>
-                    <td className="px-4 py-3">{r.actif ? "Oui" : "Non"}</td>
-                    <td className="px-4 py-3">
-                      {new Date(r.date_adhesion).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => openEditModal(r)}
-                          className="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => openDeleteModal(r)}
-                          className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              {!loading && rows.length === 0 && (
-                <tr>
-                  <td className="px-4 py-3" colSpan={5}>
-                    Aucun membre.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+            {rows.length === 0 && (
+              <tr>
+                <td className="p-3 text-center" colSpan={6}>
+                  Aucun membre.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       )}
 
-      {coopId && viewMode === "card" && (
+      {viewMode === "card" && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-          {loading && (
-            <div className="col-span-full text-center">Chargement…</div>
-          )}
-          {!loading &&
-            rows.map((member) => (
-              <div
-                key={member.id}
-                className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 shadow-sm bg-white dark:bg-neutral-900"
-              >
-                <h3 className="text-lg font-semibold">Member #{member.id}</h3>
-                <p>
-                  <strong>Utilisateur:</strong> #{member.utilisateur}
-                </p>
-                <p>
-                  <strong>Actif:</strong> {member.actif ? "Oui" : "Non"}
-                </p>
-                <p>
-                  <strong>Adhésion:</strong>{" "}
-                  {new Date(member.date_adhesion).toLocaleDateString()}
-                </p>
-                <p>
-                  <strong>Coopérative:</strong>{" "}
-                  {coops.find((c) => c.id === member.cooperative)?.nom || "N/A"}
-                </p>
+          {rows.map((membre) => (
+            <div
+              key={membre.id}
+              className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 shadow-sm bg-white dark:bg-neutral-900"
+            >
+              <h3 className="text-lg font-semibold">Membre #{membre.id}</h3>
+              <p>
+                <strong>Utilisateur:</strong>{" "}
+                {users.find((u) => u.id === membre.utilisateur)?.username || `#${membre.utilisateur}`}
+              </p>
+              <p>
+                <strong>Coopérative:</strong>{" "}
+                {coops.find((c) => c.id === membre.cooperative)?.nom || `#${membre.cooperative}`}
+              </p>
+              <p>
+                <strong>Actif:</strong> {membre.actif ? "Oui" : "Non"}
+              </p>
+              <p>
+                <strong>Date d'adhésion:</strong> {new Date(membre.date_adhesion).toLocaleDateString()}
+              </p>
+              {canManage && (
                 <div className="mt-4 flex space-x-2">
                   <button
-                    onClick={() => openEditModal(member)}
+                    onClick={() => openEditModal(membre)}
                     className="px-3 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600"
                   >
                     Edit
                   </button>
                   <button
-                    onClick={() => openDeleteModal(member)}
+                    onClick={() => openDeleteModal(membre)}
                     className="px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600"
                   >
                     Delete
                   </button>
                 </div>
-              </div>
-            ))}
-          {!loading && rows.length === 0 && (
-            <div className="col-span-full text-center">Aucun membre.</div>
-          )}
+              )}
+            </div>
+          ))}
+          {rows.length === 0 && <div className="col-span-full text-center">Aucun membre.</div>}
         </div>
       )}
 
-      {/* Add Modal */}
-      {isAddModalOpen && (
+      {/* Create Modal */}
+      {isCreateModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">Add Member</h2>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleAdd();
-              }}
-            >
+            <h2 className="text-xl font-semibold mb-4">Créer Membre</h2>
+            {coops.length === 0 && (
+              <p className="text-red-500 mb-4">Aucune coopérative disponible. Veuillez en créer une d'abord.</p>
+            )}
+            {users.length === 0 && (
+              <p className="text-red-500 mb-4">Aucun utilisateur disponible. Veuillez en créer un d'abord.</p>
+            )}
+            <form onSubmit={handleSubmit(onSubmit)}>
               <div className="mb-4">
-                <label className="block text-sm font-medium">Utilisateur ID</label>
-                <input
-                  type="number"
-                  name="utilisateur"
-                  value={formData.utilisateur}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  required
+                <label className="block text-sm font-medium">Utilisateur</label>
+                <Select
+                  {...register("utilisateur", { required: "L'utilisateur est requis" })}
+                  onChange={(v) => setValue("utilisateur", v)}
+                  options={users.map((u) => ({ label: `${u.username} (#${u.id})`, value: String(u.id) }))}
+                  placeholder="Sélectionnez un utilisateur"
                 />
+                {errors.utilisateur && (
+                  <p className="text-red-500 text-sm mt-1">{errors.utilisateur.message}</p>
+                )}
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium">Date d'adhésion</label>
-                <input
-                  type="date"
-                  name="date_adhesion"
-                  value={formData.date_adhesion}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  required
+                <label className="block text-sm font-medium">Coopérative</label>
+                <Select
+                  {...register("cooperative", { required: "La coopérative est requise" })}
+                  onChange={(v) => setValue("cooperative", v)}
+                  options={coops.map((c) => ({ label: c.nom, value: String(c.id) }))}
+                  placeholder="Sélectionnez une coopérative"
                 />
+                {errors.cooperative && (
+                  <p className="text-red-500 text-sm mt-1">{errors.cooperative.message}</p>
+                )}
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Actif</label>
                 <input
                   type="checkbox"
-                  name="actif"
-                  checked={formData.actif}
-                  onChange={handleInputChange}
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                  {...register("actif")}
+                  className="rounded border-neutral-300 dark:border-neutral-700"
                 />
               </div>
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
-                  onClick={() => setIsAddModalOpen(false)}
+                  onClick={() => setIsCreateModalOpen(false)}
                   className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                  disabled={isLoading}
                 >
-                  Cancel
+                  Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  className={`px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 ${
+                    isLoading || coops.length === 0 || users.length === 0 ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  disabled={isLoading || coops.length === 0 || users.length === 0}
                 >
-                  Add
+                  {isLoading ? "Création..." : "Créer"}
                 </button>
               </div>
             </form>
@@ -334,48 +371,43 @@ export default function Members() {
       )}
 
       {/* Edit Modal */}
-      {isEditModalOpen && selectedMember && (
+      {isEditModalOpen && selectedMembre && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">
-              Edit Member #{selectedMember.id}
-            </h2>
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                handleEdit();
-              }}
-            >
+            <h2 className="text-xl font-semibold mb-4">Modifier Membre #{selectedMembre.id}</h2>
+            <form onSubmit={handleSubmit(handleEdit)}>
               <div className="mb-4">
-                <label className="block text-sm font-medium">Utilisateur ID</label>
-                <input
-                  type="number"
-                  name="utilisateur"
-                  value={formData.utilisateur}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  required
+                <label className="block text-sm font-medium">Utilisateur</label>
+                <Select
+                  {...register("utilisateur", { required: "L'utilisateur est requis" })}
+                  onChange={(v) => setValue("utilisateur", v)}
+                  options={users.map((u) => ({ label: `${u.username} (#${u.id})`, value: String(u.id) }))}
+                  placeholder="Sélectionnez un utilisateur"
+                  value={String(selectedMembre.utilisateur)}
                 />
+                {errors.utilisateur && (
+                  <p className="text-red-500 text-sm mt-1">{errors.utilisateur.message}</p>
+                )}
               </div>
               <div className="mb-4">
-                <label className="block text-sm font-medium">Date d'adhésion</label>
-                <input
-                  type="date"
-                  name="date_adhesion"
-                  value={formData.date_adhesion}
-                  onChange={handleInputChange}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  required
+                <label className="block text-sm font-medium">Coopérative</label>
+                <Select
+                  {...register("cooperative", { required: "La coopérative est requise" })}
+                  onChange={(v) => setValue("cooperative", v)}
+                  options={coops.map((c) => ({ label: c.nom, value: String(c.id) }))}
+                  placeholder="Sélectionnez une coopérative"
+                  value={String(selectedMembre.cooperative)}
                 />
+                {errors.cooperative && (
+                  <p className="text-red-500 text-sm mt-1">{errors.cooperative.message}</p>
+                )}
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Actif</label>
                 <input
                   type="checkbox"
-                  name="actif"
-                  checked={formData.actif}
-                  onChange={handleInputChange}
-                  className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                  {...register("actif")}
+                  className="rounded border-neutral-300 dark:border-neutral-700"
                 />
               </div>
               <div className="flex justify-end space-x-2">
@@ -383,14 +415,18 @@ export default function Members() {
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
                   className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                  disabled={isLoading}
                 >
-                  Cancel
+                  Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  className={`px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 ${
+                    isLoading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  disabled={isLoading}
                 >
-                  Save
+                  {isLoading ? "Enregistrement..." : "Enregistrer"}
                 </button>
               </div>
             </form>
@@ -399,23 +435,30 @@ export default function Members() {
       )}
 
       {/* Delete Modal */}
-      {isDeleteModalOpen && selectedMember && (
+      {isDeleteModalOpen && selectedMembre && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">Confirm Deletion</h2>
-            <p>Are you sure you want to delete member #{selectedMember.id}?</p>
+            <h2 className="text-xl font-semibold mb-4">Confirmer la suppression</h2>
+            <p>
+              Êtes-vous sûr de vouloir supprimer le membre #{selectedMembre.id} (
+              {users.find((u) => u.id === selectedMembre.utilisateur)?.username || `#${selectedMembre.utilisateur}`}) ?
+            </p>
             <div className="flex justify-end space-x-2 mt-4">
               <button
                 onClick={() => setIsDeleteModalOpen(false)}
                 className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                disabled={isLoading}
               >
-                Cancel
+                Annuler
               </button>
               <button
                 onClick={handleDelete}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                className={`px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 ${
+                  isLoading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={isLoading}
               >
-                Delete
+                {isLoading ? "Suppression..." : "Supprimer"}
               </button>
             </div>
           </div>

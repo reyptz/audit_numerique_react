@@ -1,87 +1,133 @@
-# Welcome to React Router!
+# Application d'Audit Numérique
 
-A modern, production-ready template for building full-stack React applications using React Router.
+Application web moderne pour la gestion et le suivi des audits numériques, développée avec React, TypeScript et React Router.
 
-[![Open in StackBlitz](https://developer.stackblitz.com/img/open_in_stackblitz.svg)](https://stackblitz.com/github/remix-run/react-router-templates/tree/main/default)
+## Fonctionnalités principales
 
-## Features
+- 📊 Tableau de bord d'audit interactif
+- 👥 Gestion des membres et coopératives
+- 💬 Système de messagerie intégré
+- 🔔 Notifications en temps réel
+- 📈 Visualisation des données avec graphiques
+- 🔐 Authentification et autorisation sécurisées
+- 📱 Interface réactive (mobile & desktop)
 
-- 🚀 Server-side rendering
-- ⚡️ Hot Module Replacement (HMR)
-- 📦 Asset bundling and optimization
-- 🔄 Data loading and mutations
-- 🔒 TypeScript by default
-- 🎉 TailwindCSS for styling
-- 📖 [React Router docs](https://reactrouter.com/)
+## Technologies utilisées
 
-## Getting Started
+- ⚛️ React 19 avec React Router 7
+- 🔷 TypeScript
+- 🎨 Tailwind CSS pour le styling
+- 📊 Recharts et Chart.js pour les visualisations
+- 🏗️ Architecture modulaire et évolutive
+- 🔄 Gestion d'état avec Zustand
+- 📝 Validation des formulaires avec React Hook Form et Zod
 
-### Installation
+## Prérequis
 
-Install the dependencies:
+- Node.js 18+
+- npm 9+ ou pnpm 8+ ou yarn 1.22+
 
-```bash
-npm install
+## Installation
+
+1. Cloner le dépôt :
+   ```bash
+   git clone [URL_DU_REPO]
+   cd audit-numerique-react
+   ```
+
+2. Installer les dépendances :
+   ```bash
+   npm install
+   # ou
+   pnpm install
+   # ou
+   yarn
+   ```
+
+## Configuration
+
+Créez un fichier `.env` à la racine du projet avec les variables d'environnement nécessaires :
+
+```env
+VITE_API_URL=http://localhost:3000/api
+# Autres variables d'environnement...
 ```
 
-### Development
+## Développement
 
-Start the development server with HMR:
+Pour lancer l'application en mode développement :
 
 ```bash
 npm run dev
+# ou
+pnpm dev
+# ou
+yarn dev
 ```
 
-Your application will be available at `http://localhost:5173`.
+L'application sera disponible à l'adresse [http://localhost:5173](http://localhost:5173)
 
-## Building for Production
+## Construction pour la production
 
-Create a production build:
+Pour créer une version de production optimisée :
 
 ```bash
 npm run build
+# ou
+pnpm build
+# ou
+yarn build
 ```
 
-## Deployment
+## Déploiement
 
-### Docker Deployment
+### Avec Docker
 
-To build and run using Docker:
+Construire l'image Docker :
 
 ```bash
-docker build -t my-app .
-
-# Run the container
-docker run -p 3000:3000 my-app
+docker build -t audit-numerique .
 ```
 
-The containerized application can be deployed to any platform that supports Docker, including:
+Lancer le conteneur :
 
-- AWS ECS
-- Google Cloud Run
-- Azure Container Apps
-- Digital Ocean App Platform
-- Fly.io
-- Railway
-
-### DIY Deployment
-
-If you're familiar with deploying Node applications, the built-in app server is production-ready.
-
-Make sure to deploy the output of `npm run build`
-
-```
-├── package.json
-├── package-lock.json (or pnpm-lock.yaml, or bun.lockb)
-├── build/
-│   ├── client/    # Static assets
-│   └── server/    # Server-side code
+```bash
+docker run -p 3000:3000 audit-numerique
 ```
 
-## Styling
+### Déploiement manuel
 
-This template comes with [Tailwind CSS](https://tailwindcss.com/) already configured for a simple default starting experience. You can use whatever CSS framework you prefer.
+1. Construire l'application : `npm run build`
+2. Le dossier `build` contient les fichiers statiques prêts pour la production
+3. Déployez le contenu du dossier `build` sur votre serveur web préféré (Nginx, Apache, etc.)
+
+## Structure du projet
+
+```
+app/
+├── api/            # Points d'API
+├── audits/         # Fonctionnalités d'audit
+├── chat/           # Système de chat
+├── components/     # Composants réutilisables
+├── cooperatives/   # Gestion des coopératives
+├── dashboard/      # Tableau de bord
+├── layouts/        # Mises en page
+├── lib/            # Utilitaires et helpers
+├── store/          # Gestion d'état (Zustand)
+└── ...
+```
+
+## Contribution
+
+1. Créez une branche pour votre fonctionnalité : `git checkout -b feature/nouvelle-fonctionnalite`
+2. Committez vos changements : `git commit -m 'Ajout d'une nouvelle fonctionnalité'`
+3. Poussez vers la branche : `git push origin feature/nouvelle-fonctionnalite`
+4. Créez une Pull Request
+
+## Licence
+
+[À spécifier selon la licence choisie]
 
 ---
 
-Built with ❤️ using React Router.
+Développé avec ❤️ par votre équipe

@@ -1,119 +1,139 @@
 import { useEffect, useState } from "react";
-import { Prets, Membres } from "../api";
+import { CooperativeAPI, Cooperatives, Prets } from "../api";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
-import { useAuth } from "../store/auth";
 import { useForm } from "react-hook-form";
-import type { Pret, StatutPret } from "../models";
-
-// Money formatting function
-export const money = (n: number | string) =>
-  new Intl.NumberFormat(undefined, { style: "currency", currency: "XOF", maximumFractionDigits: 0 })
-    .format(typeof n === "string" ? parseFloat(n) : n);
+import type { SubmitHandler } from "react-hook-form";
+import type { Pret, Cooperative, Membre } from "../models";
+import { useAuth } from "../store/auth";
+import { money } from "../lib/format";
 
 type Form = {
-  membreId: string;
+  cooperative: string;
+  membre: string;
   montant: string;
-  motif: string;
   taux_interet: string;
-  date_echeance?: string;
-  statut: StatutPret;
+  date_echeance: string;
+  motif: string;
 };
 
 export default function PretsPage() {
+  const { user } = useAuth();
+  const [coops, setCoops] = useState<Cooperative[]>([]);
+  const [membres, setMembres] = useState<Membre[]>([]);
   const [rows, setRows] = useState<Pret[]>([]);
-  const [membres, setMembres] = useState<{ id: number; utilisateur: number }[]>([]);
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [selectedPret, setSelectedPret] = useState<Pret | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
   const [viewMode, setViewMode] = useState<"table" | "card">("table");
-  const { user } = useAuth();
-  const { register, handleSubmit, setValue, reset } = useForm<Form>({
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    reset,
+    formState: { errors },
+  } = useForm<Form>({
     defaultValues: {
-      membreId: "",
+      cooperative: "",
+      membre: "",
       montant: "",
-      motif: "",
       taux_interet: "",
       date_echeance: "",
-      statut: "demande",
+      motif: "",
     },
   });
 
-  const fetchAll = () =>
-    Prets.list()
-      .then(setRows)
-      .catch(() => setError("Erreur lors du chargement des prêts"));
+  const canManage = user?.role === "tresorier";
 
-  const fetchMembres = () =>
-    Membres.list()
+  const fetchData = () => {
+    setIsLoading(true);
+    Promise.all([Cooperatives.list().then(setCoops), Prets.list().then(setRows)])
+      .catch(() => {
+        setError("Erreur lors du chargement des données");
+        toast.error("Erreur lors du chargement");
+      })
+      .finally(() => setIsLoading(false));
+  };
+
+  const fetchMembres = (cooperativeId: string) => {
+    if (!cooperativeId) {
+      setMembres([]);
+      return;
+    }
+    setIsLoading(true);
+    CooperativeAPI.membres(Number(cooperativeId))
       .then(setMembres)
-      .catch(() => setError("Erreur lors du chargement des membres"));
+      .catch(() => {
+        setError("Erreur lors du chargement des membres");
+        toast.error("Erreur lors du chargement des membres");
+      })
+      .finally(() => setIsLoading(false));
+  };
 
   useEffect(() => {
-    fetchAll();
-    fetchMembres();
+    fetchData();
   }, []);
 
-  const onSubmit = async (data: Form) => {
+  const onSubmit: SubmitHandler<Form> = async (data) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
+      return;
+    }
+    setIsLoading(true);
     try {
       await Prets.create({
-        membre: Number(data.membreId),
+        membre: Number(data.membre),
         montant: data.montant,
-        motif: data.motif,
         taux_interet: data.taux_interet,
-        date_echeance: data.date_echeance || null,
-        statut: data.statut,
-      });
-      toast.success("Prêt créé !");
-      reset({
-        membreId: "",
-        montant: "",
-        motif: "",
-        taux_interet: "",
-        date_echeance: "",
+        date_echeance: data.date_echeance,
+        motif: data.motif,
         statut: "demande",
       });
-      fetchAll();
+      toast.success("Prêt créé !");
+      reset({ cooperative: "", membre: "", montant: "", taux_interet: "", date_echeance: "", motif: "" });
+      setIsCreateModalOpen(false);
+      fetchData();
       setError(null);
     } catch {
       setError("Erreur lors de la création du prêt");
       toast.error("Erreur lors de la création");
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleEdit = async (data: Form) => {
-    if (!selectedPret) return;
+  const handleEdit: SubmitHandler<Form> = async (data) => {
+    if (!canManage || !selectedPret) return;
+    setIsLoading(true);
     try {
       const updatedPret = await Prets.update(selectedPret.id, {
-        membre: Number(data.membreId),
+        membre: Number(data.membre),
         montant: data.montant,
-        motif: data.motif,
         taux_interet: data.taux_interet,
-        date_echeance: data.date_echeance || null,
-        statut: data.statut,
+        date_echeance: data.date_echeance,
+        motif: data.motif,
+        statut: selectedPret.statut,
       });
       setRows(rows.map((row) => (row.id === selectedPret.id ? updatedPret : row)));
       setIsEditModalOpen(false);
       setSelectedPret(null);
-      reset({
-        membreId: "",
-        montant: "",
-        motif: "",
-        taux_interet: "",
-        date_echeance: "",
-        statut: "demande",
-      });
+      reset({ cooperative: "", membre: "", montant: "", taux_interet: "", date_echeance: "", motif: "" });
       toast.success("Prêt modifié !");
       setError(null);
     } catch {
       setError("Erreur lors de la modification du prêt");
       toast.error("Erreur lors de la modification");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleDelete = async () => {
-    if (!selectedPret) return;
+    if (!canManage || !selectedPret) return;
+    setIsLoading(true);
     try {
       await Prets.remove(selectedPret.id);
       setRows(rows.filter((row) => row.id !== selectedPret.id));
@@ -124,24 +144,40 @@ export default function PretsPage() {
     } catch {
       setError("Erreur lors de la suppression du prêt");
       toast.error("Erreur lors de la suppression");
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const openEditModal = (pret: Pret) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
+      return;
+    }
     setSelectedPret(pret);
-    setValue("membreId", String(pret.membre));
+    const coop = membres.find((m) => m.id === pret.membre)?.cooperative;
+    setValue("cooperative", String(coop || ""));
+    fetchMembres(String(coop || ""));
+    setValue("membre", String(pret.membre));
     setValue("montant", pret.montant);
-    setValue("motif", pret.motif);
     setValue("taux_interet", pret.taux_interet);
     setValue("date_echeance", pret.date_echeance || "");
-    setValue("statut", pret.statut);
+    setValue("motif", pret.motif);
     setIsEditModalOpen(true);
   };
 
   const openDeleteModal = (pret: Pret) => {
+    if (!canManage) {
+      toast.error("Accès refusé");
+      return;
+    }
     setSelectedPret(pret);
     setIsDeleteModalOpen(true);
   };
+
+  if (!user) {
+    return <p className="p-8 text-center">Connexion requise.</p>;
+  }
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10">
@@ -164,90 +200,51 @@ export default function PretsPage() {
           >
             Card
           </button>
+          {canManage && (
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="px-3 py-1 rounded bg-blue-500 text-white hover:bg-blue-600"
+            >
+              Créer
+            </button>
+          )}
         </div>
       </div>
 
       {error && <div className="text-red-500 mb-4">{error}</div>}
-
-      {(user?.role === "tresorier" || user?.is_staff) && (
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="mb-8 grid md:grid-cols-4 gap-3"
-        >
-          <Select
-            onChange={(v) => setValue("membreId", v)}
-            placeholder="Membre"
-            options={membres.map((m) => ({ label: `#${m.id} (Utilisateur #${m.utilisateur})`, value: m.id }))}
-          />
-          <input
-            {...register("montant", { required: true })}
-            className="rounded-xl border px-3 py-2"
-            placeholder="Montant"
-          />
-          <input
-            {...register("motif")}
-            className="rounded-xl border px-3 py-2"
-            placeholder="Motif"
-          />
-          <input
-            {...register("taux_interet", { required: true })}
-            className="rounded-xl border px-3 py-2"
-            placeholder="Taux d'intérêt (%)"
-          />
-          <input
-            {...register("date_echeance")}
-            type="date"
-            className="rounded-xl border px-3 py-2"
-            placeholder="Date d'échéance"
-          />
-          <select
-            {...register("statut", { required: true })}
-            className="rounded-xl border px-3 py-2"
-          >
-            <option value="demande">Demande</option>
-            <option value="approuve">Approuvé</option>
-            <option value="rejete">Rejeté</option>
-            <option value="en_cours">En cours</option>
-            <option value="rembourse">Remboursé</option>
-            <option value="en_retard">En retard</option>
-          </select>
-          <button className="rounded-xl bg-brand-600 text-white px-4 py-2 hover:bg-brand-700">
-            Créer
-          </button>
-        </form>
-      )}
+      {isLoading && <p className="text-center text-neutral-500">Chargement...</p>}
 
       {viewMode === "table" && (
-        <table
-          className="w-full text-sm border border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden"
-        >
+        <table className="w-full text-sm border border-neutral-200 dark:border-neutral-800 rounded-2xl overflow-hidden">
           <thead className="bg-neutral-50 dark:bg-neutral-900">
             <tr>
               <th className="p-3 text-left">#</th>
               <th className="p-3">Membre</th>
+              <th className="p-3">Coopérative</th>
               <th className="p-3">Montant</th>
-              <th className="p-3">Taux d'intérêt</th>
+              <th className="p-3">Taux d’intérêt</th>
+              <th className="p-3">Échéance</th>
+              <th className="p-3">Motif</th>
               <th className="p-3">Statut</th>
-              <th className="p-3">Date de demande</th>
-              {(user?.role === "tresorier" || user?.is_staff) && (
-                <th className="p-3">Actions</th>
-              )}
+              <th className="p-3">Actions</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((p) => (
-              <tr
-                key={p.id}
-                className="border-t border-neutral-200 dark:border-neutral-800"
-              >
+              <tr key={p.id} className="border-t border-neutral-200 dark:border-neutral-800">
                 <td className="p-3">{p.id}</td>
                 <td className="p-3">#{p.membre}</td>
+                <td className="p-3">
+                  {coops.find((c) => c.id === membres.find((m) => m.id === p.membre)?.cooperative)?.nom ||
+                    `#${membres.find((m) => m.id === p.membre)?.cooperative || "N/A"}`}
+                </td>
                 <td className="p-3">{money(p.montant)}</td>
                 <td className="p-3">{p.taux_interet}%</td>
+                <td className="p-3">{p.date_echeance ? new Date(p.date_echeance).toLocaleDateString() : "N/A"}</td>
+                <td className="p-3">{p.motif}</td>
                 <td className="p-3">{p.statut}</td>
-                <td className="p-3">{new Date(p.date_demande).toLocaleDateString()}</td>
-                {(user?.role === "tresorier" || user?.is_staff) && (
-                  <td className="p-3">
+                <td className="p-3">
+                  {canManage && (
                     <div className="flex space-x-2">
                       <button
                         onClick={() => openEditModal(p)}
@@ -262,21 +259,17 @@ export default function PretsPage() {
                         Delete
                       </button>
                     </div>
-                  </td>
-                )}
+                  )}
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td
-                  className="p-3 text-center"
-                  colSpan={user?.role === "tresorier" || user?.is_staff ? 7 : 6}
-                >
+                <td className="p-3 text-center" colSpan={9}>
                   Aucun prêt.
                 </td>
               </tr>
-            
-           )}
+            )}
           </tbody>
         </table>
       )}
@@ -293,26 +286,27 @@ export default function PretsPage() {
                 <strong>Membre:</strong> #{pret.membre}
               </p>
               <p>
+                <strong>Coopérative:</strong>{" "}
+                {coops.find((c) => c.id === membres.find((m) => m.id === pret.membre)?.cooperative)?.nom ||
+                  `#${membres.find((m) => m.id === pret.membre)?.cooperative || "N/A"}`}
+              </p>
+              <p>
                 <strong>Montant:</strong> {money(pret.montant)}
               </p>
               <p>
-                <strong>Taux d'intérêt:</strong> {pret.taux_interet}%
+                <strong>Taux d’intérêt:</strong> {pret.taux_interet}%
+              </p>
+              <p>
+                <strong>Échéance:</strong>{" "}
+                {pret.date_echeance ? new Date(pret.date_echeance).toLocaleDateString() : "N/A"}
+              </p>
+              <p>
+                <strong>Motif:</strong> {pret.motif}
               </p>
               <p>
                 <strong>Statut:</strong> {pret.statut}
               </p>
-              <p>
-                <strong>Date de demande:</strong>{" "}
-                {new Date(pret.date_demande).toLocaleDateString()}
-              </p>
-              <p>
-                <strong>Date d'échéance:</strong>{" "}
-                {pret.date_echeance ? new Date(pret.date_echeance).toLocaleDateString() : "N/A"}
-              </p>
-              <p>
-                <strong>Motif:</strong> {pret.motif || "N/A"}
-              </p>
-              {(user?.role === "tresorier" || user?.is_staff) && (
+              {canManage && (
                 <div className="mt-4 flex space-x-2">
                   <button
                     onClick={() => openEditModal(pret)}
@@ -330,91 +324,217 @@ export default function PretsPage() {
               )}
             </div>
           ))}
-          {rows.length === 0 && (
-            <div className="col-span-full text-center">Aucun prêt.</div>
-          )}
+          {rows.length === 0 && <div className="col-span-full text-center">Aucun prêt.</div>}
+        </div>
+      )}
+
+      {/* Create Modal */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
+          <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
+            <h2 className="text-xl font-semibold mb-4">Créer Prêt</h2>
+            <form onSubmit={handleSubmit(onSubmit)}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Coopérative</label>
+                <Select
+                  onChange={(v) => {
+                    setValue("cooperative", v);
+                    fetchMembres(v);
+                  }}
+                  options={coops.map((c) => ({ label: c.nom, value: c.id }))}
+                  placeholder="Coopérative"
+                />
+                {errors.cooperative && (
+                  <p className="text-red-500 text-sm mt-1">{errors.cooperative.message}</p>
+                )}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Membre</label>
+                <Select
+                  onChange={(v) => setValue("membre", v)}
+                  options={membres.map((m) => ({ label: `Membre #${m.id}`, value: m.id }))}
+                  placeholder="Membre"
+                />
+                {errors.membre && <p className="text-red-500 text-sm mt-1">{errors.membre.message}</p>}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Montant</label>
+                <input
+                  {...register("montant", {
+                    required: "Le montant est requis",
+                    pattern: { value: /^\d+(\.\d+)?$/, message: "Montant invalide" },
+                  })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.montant ? "border-red-500" : ""
+                  }`}
+                  placeholder="Montant"
+                />
+                {errors.montant && <p className="text-red-500 text-sm mt-1">{errors.montant.message}</p>}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Taux d’intérêt (%)</label>
+                <input
+                  {...register("taux_interet", {
+                    required: "Le taux est requis",
+                    pattern: { value: /^\d+(\.\d+)?$/, message: "Taux invalide" },
+                  })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.taux_interet ? "border-red-500" : ""
+                  }`}
+                  placeholder="Taux d’intérêt"
+                />
+                {errors.taux_interet && (
+                  <p className="text-red-500 text-sm mt-1">{errors.taux_interet.message}</p>
+                )}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Date d’échéance</label>
+                <input
+                  type="date"
+                  {...register("date_echeance", { required: "La date est requise" })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.date_echeance ? "border-red-500" : ""
+                  }`}
+                  placeholder="Date d’échéance"
+                />
+                {errors.date_echeance && (
+                  <p className="text-red-500 text-sm mt-1">{errors.date_echeance.message}</p>
+                )}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Motif</label>
+                <input
+                  {...register("motif", { required: "Le motif est requis" })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.motif ? "border-red-500" : ""
+                  }`}
+                  placeholder="Motif"
+                />
+                {errors.motif && <p className="text-red-500 text-sm mt-1">{errors.motif.message}</p>}
+              </div>
+              <div className="flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                  disabled={isLoading}
+                >
+                  Annuler
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 ${
+                    isLoading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  disabled={isLoading}
+                >
+                  {isLoading ? "Création..." : "Créer"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
       {/* Edit Modal */}
-      {(user?.role === "tresorier" || user?.is_staff) && isEditModalOpen && selectedPret && (
+      {isEditModalOpen && selectedPret && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
-            <h2 className="text-xl font-semibold mb-4">
-              Modifier Prêt #{selectedPret.id}
-            </h2>
-            <form
-              onSubmit={handleSubmit(handleEdit)}
-            >
+            <h2 className="text-xl font-semibold mb-4">Modifier Prêt #{selectedPret.id}</h2>
+            <form onSubmit={handleSubmit(handleEdit)}>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Coopérative</label>
+                <Select
+                  onChange={(v) => {
+                    setValue("cooperative", v);
+                    fetchMembres(v);
+                  }}
+                  options={coops.map((c) => ({ label: c.nom, value: c.id }))}
+                  placeholder="Coopérative"
+                  value={String(membres.find((m) => m.id === selectedPret.membre)?.cooperative || "")}
+                />
+              </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Membre</label>
                 <Select
-                  onChange={(v) => setValue("membreId", v)}
+                  onChange={(v) => setValue("membre", v)}
+                  options={membres.map((m) => ({ label: `Membre #${m.id}`, value: m.id }))}
                   placeholder="Membre"
-                  options={membres.map((m) => ({ label: `#${m.id} (Utilisateur #${m.utilisateur})`, value: m.id }))}
                   value={String(selectedPret.membre)}
                 />
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Montant</label>
                 <input
-                  {...register("montant", { required: true })}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
+                  {...register("montant", {
+                    required: "Le montant est requis",
+                    pattern: { value: /^\d+(\.\d+)?$/, message: "Montant invalide" },
+                  })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.montant ? "border-red-500" : ""
+                  }`}
                   placeholder="Montant"
                 />
+                {errors.montant && <p className="text-red-500 text-sm mt-1">{errors.montant.message}</p>}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Taux d’intérêt (%)</label>
+                <input
+                  {...register("taux_interet", {
+                    required: "Le taux est requis",
+                    pattern: { value: /^\d+(\.\d+)?$/, message: "Taux invalide" },
+                  })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.taux_interet ? "border-red-500" : ""
+                  }`}
+                  placeholder="Taux d’intérêt"
+                />
+                {errors.taux_interet && (
+                  <p className="text-red-500 text-sm mt-1">{errors.taux_interet.message}</p>
+                )}
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium">Date d’échéance</label>
+                <input
+                  type="date"
+                  {...register("date_echeance", { required: "La date est requise" })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.date_echeance ? "border-red-500" : ""
+                  }`}
+                  placeholder="Date d’échéance"
+                />
+                {errors.date_echeance && (
+                  <p className="text-red-500 text-sm mt-1">{errors.date_echeance.message}</p>
+                )}
               </div>
               <div className="mb-4">
                 <label className="block text-sm font-medium">Motif</label>
                 <input
-                  {...register("motif")}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
+                  {...register("motif", { required: "Le motif est requis" })}
+                  className={`w-full p-2 border rounded dark:bg-neutral-700 ${
+                    errors.motif ? "border-red-500" : ""
+                  }`}
                   placeholder="Motif"
                 />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium">Taux d'intérêt (%)</label>
-                <input
-                  {...register("taux_interet", { required: true })}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  placeholder="Taux d'intérêt (%)"
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium">Date d'échéance</label>
-                <input
-                  {...register("date_echeance")}
-                  type="date"
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                  placeholder="Date d'échéance"
-                />
-              </div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium">Statut</label>
-                <select
-                  {...register("statut", { required: true })}
-                  className="w-full p-2 border rounded dark:bg-neutral-700"
-                >
-                  <option value="demande">Demande</option>
-                  <option value="approuve">Approuvé</option>
-                  <option value="rejete">Rejeté</option>
-                  <option value="en_cours">En cours</option>
-                  <option value="rembourse">Remboursé</option>
-                  <option value="en_retard">En retard</option>
-                </select>
+                {errors.motif && <p className="text-red-500 text-sm mt-1">{errors.motif.message}</p>}
               </div>
               <div className="flex justify-end space-x-2">
                 <button
                   type="button"
                   onClick={() => setIsEditModalOpen(false)}
                   className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                  disabled={isLoading}
                 >
                   Annuler
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+                  className={`px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 ${
+                    isLoading ? "opacity-50 cursor-not-allowed" : ""
+                  }`}
+                  disabled={isLoading}
                 >
-                  En salvaged Enregistrer
+                  {isLoading ? "Enregistrement..." : "Enregistrer"}
                 </button>
               </div>
             </form>
@@ -423,25 +543,27 @@ export default function PretsPage() {
       )}
 
       {/* Delete Modal */}
-      {(user?.role === "tresorier" || user?.is_staff) && isDeleteModalOpen && selectedPret && (
+      {isDeleteModalOpen && selectedPret && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
           <div className="bg-white dark:bg-neutral-800 p-6 rounded-lg w-full max-w-md">
             <h2 className="text-xl font-semibold mb-4">Confirmer la suppression</h2>
-            <p>
-              Êtes-vous sûr de vouloir supprimer le prêt #{selectedPret.id} (Membre #{selectedPret.membre}) ?
-            </p>
+            <p>Êtes-vous sûr de vouloir supprimer le prêt #{selectedPret.id} (Membre #{selectedPret.membre}) ?</p>
             <div className="flex justify-end space-x-2 mt-4">
               <button
                 onClick={() => setIsDeleteModalOpen(false)}
                 className="px-4 py-2 bg-gray-300 rounded hover:bg-gray-400"
+                disabled={isLoading}
               >
                 Annuler
               </button>
               <button
                 onClick={handleDelete}
-                className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600"
+                className={`px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 ${
+                  isLoading ? "opacity-50 cursor-not-allowed" : ""
+                }`}
+                disabled={isLoading}
               >
-                Supprimer
+                {isLoading ? "Suppression..." : "Supprimer"}
               </button>
             </div>
           </div>
